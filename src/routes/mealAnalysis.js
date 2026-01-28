@@ -6,6 +6,7 @@
 const express = require('express');
 const multer = require('multer');
 const { analyzeMealText, analyzeMealImage } = require('../services/geminiService');
+const Entry = require('../models/Entry');
 
 const router = express.Router();
 
@@ -24,6 +25,34 @@ const upload = multer({
       cb(new Error('Only image files are allowed'), false);
     }
   },
+});
+
+// GET route to fetch all saved meal entries
+router.get('/entries', async (req, res) => {
+  try {
+    console.log(' Fetching all entries from database...');
+    
+    const entries = await Entry.find({ type: 'meal' })
+      .sort({ createdAt: -1 }) // Most recent first
+      .limit(50); // Limit to 50 entries
+    
+    console.log(` Found ${entries.length} meal entries`);
+    
+    res.status(200).json({
+      success: true,
+      count: entries.length,
+      data: entries,
+      message: 'Entries retrieved successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error fetching entries:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch entries',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
 });
 
 
@@ -45,14 +74,47 @@ router.post('/analyze-meal-text', async (req, res) => {
       });
     }
 
-    // Analyze the meal text
-    const nutritionData = await analyzeMealText(mealText.trim());
+    console.log(' Processing meal analysis request for:', mealText.trim());
 
-    // Return successful response
-    res.status(200).json({
+    // Analyze the meal text using Gemini AI
+    const nutritionData = await analyzeMealText(mealText.trim());
+    console.log(' Gemini analysis completed:', nutritionData);
+
+    // Prepare data for database save
+    const entryData = {
+      name: nutritionData.detected_food_items.join(', '), // Join food items as meal name
+      type: 'meal',
+      calories: nutritionData.calories,
+      protein: nutritionData.protein_g,
+      carbs: nutritionData.carbs_g,
+      fats: nutritionData.fat_g,
+      date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
+    };
+
+    console.log(' Saving to database:', entryData);
+
+    // Save to MongoDB
+    const savedEntry = await Entry.create(entryData);
+    console.log(' Successfully saved to database with ID:', savedEntry._id);
+
+    // Return successful response with both analysis and saved data
+    res.status(201).json({
       success: true,
-      data: nutritionData,
-      message: 'Meal analyzed successfully',
+      data: {
+        analysis: nutritionData,
+        saved_entry: {
+          id: savedEntry._id,
+          name: savedEntry.name,
+          type: savedEntry.type,
+          calories: savedEntry.calories,
+          protein: savedEntry.protein,
+          carbs: savedEntry.carbs,
+          fats: savedEntry.fats,
+          date: savedEntry.date,
+          created_at: savedEntry.createdAt
+        }
+      },
+      message: 'Meal analyzed and saved successfully',
     });
   } catch (error) {
     console.error('Error in /analyze-meal-text:', error);
@@ -60,6 +122,14 @@ router.post('/analyze-meal-text', async (req, res) => {
     const status = error?.status ?? error?.cause?.status;
     const code = error?.code ?? error?.cause?.code;
     const message = error?.message ?? '';
+
+    // Handle database save errors
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Database validation error: ' + error.message,
+      });
+    }
 
     // Handle specific error types
     if (status === 401 || code === 'invalid_api_key' || code === 'missing_api_key' || message.toLowerCase().includes('api key')) {
@@ -101,14 +171,47 @@ router.post('/analyze-meal-image', upload.single('meal_image'), async (req, res)
     const imageBuffer = req.file.buffer;
     const imageMimeType = req.file.mimetype;
 
-    // Analyze the meal image
-    const nutritionData = await analyzeMealImage(imageBuffer, imageMimeType);
+    console.log(' Processing meal image analysis, file size:', imageBuffer.length, 'bytes');
 
-    // Return successful response
-    res.status(200).json({
+    // Analyze the meal image using Gemini AI
+    const nutritionData = await analyzeMealImage(imageBuffer, imageMimeType);
+    console.log(' Gemini image analysis completed:', nutritionData);
+
+    // Prepare data for database save
+    const entryData = {
+      name: nutritionData.detected_food_items.join(', '), // Join food items as meal name
+      type: 'meal',
+      calories: nutritionData.calories,
+      protein: nutritionData.protein_g,
+      carbs: nutritionData.carbs_g,
+      fats: nutritionData.fat_g,
+      date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
+    };
+
+    console.log(' Saving image analysis to database:', entryData);
+
+    // Save to MongoDB
+    const savedEntry = await Entry.create(entryData);
+    console.log(' Successfully saved image analysis to database with ID:', savedEntry._id);
+
+    // Return successful response with both analysis and saved data
+    res.status(201).json({
       success: true,
-      data: nutritionData,
-      message: 'Meal image analyzed successfully',
+      data: {
+        analysis: nutritionData,
+        saved_entry: {
+          id: savedEntry._id,
+          name: savedEntry.name,
+          type: savedEntry.type,
+          calories: savedEntry.calories,
+          protein: savedEntry.protein,
+          carbs: savedEntry.carbs,
+          fats: savedEntry.fats,
+          date: savedEntry.date,
+          created_at: savedEntry.createdAt
+        }
+      },
+      message: 'Meal image analyzed and saved successfully',
     });
   } catch (error) {
     console.error('Error in /analyze-meal-image:', error);
@@ -116,6 +219,14 @@ router.post('/analyze-meal-image', upload.single('meal_image'), async (req, res)
     const status = error?.status ?? error?.cause?.status;
     const code = error?.code ?? error?.cause?.code;
     const message = error?.message ?? '';
+
+    // Handle database save errors
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        error: 'Database validation error: ' + error.message,
+      });
+    }
 
     // Handle multer errors
     if (error instanceof multer.MulterError) {

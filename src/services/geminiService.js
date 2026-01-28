@@ -17,6 +17,12 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
  */
 function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
+  
+  console.log(' Checking Gemini API key...');
+  console.log(' API key exists:', !!apiKey);
+  console.log(' API key length:', apiKey ? apiKey.length : 0);
+  console.log(' API key starts with:', apiKey ? apiKey.substring(0, 8) + '...' : 'N/A');
+  
   if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) {
     const err = new Error('Gemini API key not configured: set GEMINI_API_KEY in your .env');
     // Surface as "unauthorized" to API callers (similar to invalid/missing key).
@@ -24,6 +30,8 @@ function getGeminiClient() {
     err.code = 'missing_api_key';
     throw err;
   }
+  
+  console.log(' Gemini API key validated successfully');
   return new GoogleGenerativeAI(apiKey.trim());
 }
 
