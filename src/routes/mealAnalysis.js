@@ -31,20 +31,20 @@ const upload = multer({
 router.get('/entries', async (req, res) => {
   try {
     console.log(' Fetching all entries from database...');
-    
+
     const entries = await Entry.find({ type: 'meal' })
       .sort({ createdAt: -1 }) // Most recent first
       .limit(50); // Limit to 50 entries
-    
+
     console.log(` Found ${entries.length} meal entries`);
-    
+
     res.status(200).json({
       success: true,
       count: entries.length,
       data: entries,
       message: 'Entries retrieved successfully'
     });
-    
+
   } catch (error) {
     console.error('Error fetching entries:', error);
     res.status(500).json({
@@ -68,7 +68,7 @@ router.post('/analyze-meal-text', async (req, res) => {
         success: false,
         error: 'Invalid request: meal_text (or meal-text) is required and must be a non-empty string',
         received_fields: receivedKeys.length > 0 ? receivedKeys : ['none'],
-        hint: receivedKeys.length > 0 
+        hint: receivedKeys.length > 0
           ? `You sent: ${JSON.stringify(receivedKeys)}. Expected: "meal_text" or "meal-text"`
           : 'Request body is empty. Make sure you are sending JSON with Content-Type: application/json',
       });
@@ -80,14 +80,19 @@ router.post('/analyze-meal-text', async (req, res) => {
     const nutritionData = await analyzeMealText(mealText.trim());
     console.log(' Gemini analysis completed:', nutritionData);
 
-    // Prepare data for database save
+    // Defensive check for required nutrition data
+    if (!nutritionData.total || !nutritionData.total.calories || typeof nutritionData.total.calories.value !== 'number') {
+      throw new Error('Calories missing in normalized Gemini response');
+    }
+
+    // Prepare data for database save using the new normalized structure
     const entryData = {
       name: nutritionData.detected_food_items.join(', '), // Join food items as meal name
       type: 'meal',
-      calories: nutritionData.calories,
-      protein: nutritionData.protein_g,
-      carbs: nutritionData.carbs_g,
-      fats: nutritionData.fat_g,
+      calories: nutritionData.total.calories.value,
+      protein: nutritionData.total.protein.value,
+      carbs: nutritionData.total.carbs.value,
+      fats: nutritionData.total.fat.value,
       date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
     };
 
@@ -101,7 +106,17 @@ router.post('/analyze-meal-text', async (req, res) => {
     res.status(201).json({
       success: true,
       data: {
-        analysis: nutritionData,
+        // Enhanced nutrition data with individual dishes and totals
+        dishes: nutritionData.dishes,
+        total: nutritionData.total,
+        // Legacy analysis format for backward compatibility
+        analysis: {
+          detected_food_items: nutritionData.detected_food_items,
+          calories: nutritionData.calories,
+          protein_g: nutritionData.protein_g,
+          carbs_g: nutritionData.carbs_g,
+          fat_g: nutritionData.fat_g
+        },
         saved_entry: {
           id: savedEntry._id,
           name: savedEntry.name,
@@ -159,7 +174,7 @@ router.post('/analyze-meal-text', async (req, res) => {
 
 router.post('/analyze-meal-image', upload.single('meal_image'), async (req, res) => {
   try {
-  
+
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -177,14 +192,19 @@ router.post('/analyze-meal-image', upload.single('meal_image'), async (req, res)
     const nutritionData = await analyzeMealImage(imageBuffer, imageMimeType);
     console.log(' Gemini image analysis completed:', nutritionData);
 
-    // Prepare data for database save
+    // Defensive check for required nutrition data
+    if (!nutritionData.total || !nutritionData.total.calories || typeof nutritionData.total.calories.value !== 'number') {
+      throw new Error('Calories missing in normalized Gemini response');
+    }
+
+    // Prepare data for database save using the new normalized structure
     const entryData = {
       name: nutritionData.detected_food_items.join(', '), // Join food items as meal name
       type: 'meal',
-      calories: nutritionData.calories,
-      protein: nutritionData.protein_g,
-      carbs: nutritionData.carbs_g,
-      fats: nutritionData.fat_g,
+      calories: nutritionData.total.calories.value,
+      protein: nutritionData.total.protein.value,
+      carbs: nutritionData.total.carbs.value,
+      fats: nutritionData.total.fat.value,
       date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format
     };
 
@@ -198,7 +218,17 @@ router.post('/analyze-meal-image', upload.single('meal_image'), async (req, res)
     res.status(201).json({
       success: true,
       data: {
-        analysis: nutritionData,
+        // Enhanced nutrition data with individual dishes and totals
+        dishes: nutritionData.dishes,
+        total: nutritionData.total,
+        // Legacy analysis format for backward compatibility
+        analysis: {
+          detected_food_items: nutritionData.detected_food_items,
+          calories: nutritionData.calories,
+          protein_g: nutritionData.protein_g,
+          carbs_g: nutritionData.carbs_g,
+          fat_g: nutritionData.fat_g
+        },
         saved_entry: {
           id: savedEntry._id,
           name: savedEntry.name,

@@ -49,27 +49,41 @@ function getVisionModelName() {
 }
 
 function buildNutritionPrompt({ mealText, isVision }) {
-  // Keep prompt strict: JSON only, no markdown/code fences.
-  // We keep the exact schema expected by your frontend/API contract.
+  // Enhanced prompt to get individual dish nutrition data
   return `You are a nutrition analysis expert.
-Analyze the provided meal and estimate nutrition.
+Analyze the provided meal and estimate nutrition for each individual dish/food item separately, then provide totals.
 
 ${isVision ? 'Meal input: An image of a meal will be provided.' : `Meal description: "${mealText}"`}
 
 Return ONLY a valid JSON object with EXACTLY this structure (no extra keys, no extra text):
 {
-  "detected_food_items": ["string"],
-  "calories": number,
-  "protein_g": number,
-  "carbs_g": number,
-  "fat_g": number
+  "dishes": [
+    {
+      "name": "dish name",
+      "nutrition": {
+        "calories": number,
+        "protein_g": number,
+        "carbs_g": number,
+        "fat_g": number
+      }
+    }
+  ],
+  "total": {
+    "calories": number,
+    "protein_g": number,
+    "carbs_g": number,
+    "fat_g": number
+  }
 }
 
 Rules:
-- "detected_food_items" must be an array of strings (at least 1 item).
-- calories/protein_g/carbs_g/fat_g must be JSON numbers (no quotes), non-negative.
+- "dishes" must be an array with at least 1 dish object.
+- Each dish must have a "name" (string) and "nutrition" object.
+- All nutrition values must be JSON numbers (no quotes), non-negative.
+- "total" must be the sum of all individual dish nutrition values.
 - Do NOT wrap output in markdown or code fences.
-- If uncertain, make best estimates based on typical serving sizes.`;
+- If uncertain, make best estimates based on typical serving sizes.
+- Separate different food items into individual dishes (e.g., "rice" and "dal" should be separate dishes).`;
 }
 
 function extractJsonObject(text) {
@@ -87,31 +101,77 @@ function extractJsonObject(text) {
 /**
  * Validate and normalize nutrition data to ensure consistent format
  * @param {Object} data - Raw nutrition data from AI
- * @returns {Object} Normalized nutrition data
+ * @returns {Object} Normalized nutrition data with individual dishes and totals
  */
 function validateAndNormalizeNutritionData(data) {
-  // Ensure all required fields exist with valid types
-  const normalized = {
-    detected_food_items: Array.isArray(data?.detected_food_items)
-      ? data.detected_food_items.filter((item) => typeof item === 'string' && item.trim().length > 0)
-      : [],
-    calories: typeof data?.calories === 'number' ? Math.round(data.calories) : 0,
-    protein_g: typeof data?.protein_g === 'number' ? Math.round(data.protein_g * 10) / 10 : 0,
-    carbs_g: typeof data?.carbs_g === 'number' ? Math.round(data.carbs_g * 10) / 10 : 0,
-    fat_g: typeof data?.fat_g === 'number' ? Math.round(data.fat_g * 10) / 10 : 0,
-  };
+  // Helper function to round nutrition values to 2 decimal places
+  const roundToTwo = (num) => Math.round((num || 0) * 100) / 100;
+  
+  // Helper function to format nutrition with units
+  const formatNutritionWithUnits = (nutrition) => ({
+    calories: { value: Math.max(0, Math.round(nutrition.calories || 0)), unit: 'kcal' },
+    protein: { value: Math.max(0, roundToTwo(nutrition.protein_g || 0)), unit: 'g' },
+    carbs: { value: Math.max(0, roundToTwo(nutrition.carbs_g || 0)), unit: 'g' },
+    fat: { value: Math.max(0, roundToTwo(nutrition.fat_g || 0)), unit: 'g' }
+  });
 
-  if (normalized.detected_food_items.length === 0) {
-    normalized.detected_food_items = ['Unidentified food items'];
+  // Validate and normalize dishes
+  let dishes = [];
+  if (Array.isArray(data?.dishes) && data.dishes.length > 0) {
+    dishes = data.dishes
+      .filter(dish => dish && typeof dish.name === 'string' && dish.name.trim().length > 0)
+      .map(dish => ({
+        name: dish.name.trim(),
+        nutrition: formatNutritionWithUnits(dish.nutrition || {})
+      }));
   }
 
- 
-  normalized.calories = Math.max(0, normalized.calories);
-  normalized.protein_g = Math.max(0, normalized.protein_g);
-  normalized.carbs_g = Math.max(0, normalized.carbs_g);
-  normalized.fat_g = Math.max(0, normalized.fat_g);
+  // If no valid dishes, create a fallback dish
+  if (dishes.length === 0) {
+    dishes = [{
+      name: 'Unidentified food items',
+      nutrition: formatNutritionWithUnits({
+        calories: data?.calories || data?.total?.calories || 0,
+        protein_g: data?.protein_g || data?.total?.protein_g || 0,
+        carbs_g: data?.carbs_g || data?.total?.carbs_g || 0,
+        fat_g: data?.fat_g || data?.total?.fat_g || 0
+      })
+    }];
+  }
 
-  return normalized;
+  // Calculate totals (sum of all dishes or use provided total)
+  let total;
+  if (data?.total && typeof data.total === 'object') {
+    // Use provided total if available
+    total = formatNutritionWithUnits(data.total);
+  } else {
+    // Calculate total from dishes
+    const calculatedTotal = dishes.reduce((acc, dish) => ({
+      calories: acc.calories + dish.nutrition.calories.value,
+      protein_g: acc.protein_g + dish.nutrition.protein.value,
+      carbs_g: acc.carbs_g + dish.nutrition.carbs.value,
+      fat_g: acc.fat_g + dish.nutrition.fat.value
+    }), { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
+    
+    total = formatNutritionWithUnits(calculatedTotal);
+  }
+
+  // Maintain backward compatibility by including legacy fields
+  const legacyData = {
+    detected_food_items: dishes.map(dish => dish.name),
+    calories: total.calories.value,
+    protein_g: total.protein.value,
+    carbs_g: total.carbs.value,
+    fat_g: total.fat.value
+  };
+
+  return {
+    // New enhanced format
+    dishes,
+    total,
+    // Legacy format for backward compatibility
+    ...legacyData
+  };
 }
 
 function wrapGeminiError(error, prefixMessage) {
