@@ -179,6 +179,43 @@ router.post('/entries', async (req, res) => {
   }
 });
 
+router.delete('/enteries',async(req,res)=>{
+  try {
+     const date = req.query.date;
+     console.log("date :",date);
+    // Validate format dd-mm-yy using regex
+     const dateRegex = /^\d{2}-\d{2}-\d{2}$/;
+     if(!dateRegex.test(date)){
+        console.error("invalid date format.");
+       return res.status(400).json({error: "invalid date format. use dd-mm-yy format"})
+      }
+
+      const [day, month, year] = date.split('-');
+      const fullYear = `20${year}`;
+  
+      const startDate = new Date(`${fullYear}-${month}-${day}T00:00:00.000Z`);
+      const endDate = new Date(`${fullYear}-${month}-${day}T23:59:59.999Z`);
+      const newDate=`${fullYear}-${month}-${day}`;
+      console.log(`neew format date is : ${newDate}`);
+  
+      // Delete all entries of that day
+      const result = await Entry.deleteMany({
+        // date: { $gte: startDate, $lte: endDate }
+        date:newDate
+      });
+  
+      res.status(200).json({
+        success: true,
+        message: `Deleted entries for ${date}`,
+        deletedCount: result.deletedCount
+      });
+    
+  } catch (error) {
+    console.error("Error in route /entries :",error);
+    res.status(500).json({ error: error.message });
+
+  }
+})
 
 router.post('/analyze-meal-image', upload.single('meal_image'), async (req, res) => {
   try {
