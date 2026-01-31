@@ -56,8 +56,16 @@ router.get('/entries', async (req, res) => {
 });
 
 
-router.post('/analyze-meal-text', async (req, res) => {
+router.post('/entries', async (req, res) => {
   try {
+    const date = req.query.date;
+    console.log("date :",date);
+    // Validate format dd-mm-yy using regex
+    const dateRegex = /^\d{2}-\d{2}-\d{2}$/;
+    if(!dateRegex.test(date)){
+      console.error("invalid date format.");
+      return res.status(400).json({error: "invalid date format. use dd-mm-yy format"})
+    }
     // Validate request body - accept both 'meal_text' and 'meal-text' for flexibility
     const mealText = req.body.meal_text || req.body['meal-text'];
 
