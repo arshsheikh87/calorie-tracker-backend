@@ -7,7 +7,7 @@ const express = require('express');
 const multer = require('multer');
 const { analyzeMealText, analyzeMealImage } = require('../services/geminiService');
 const Entry = require('../models/Entry');
-
+const mongoose=require('mongoose');
 const router = express.Router();
 
 // Configure multer for image uploads
@@ -180,35 +180,59 @@ router.post('/entries', async (req, res) => {
 });
 
 router.delete('/enteries',async(req,res)=>{
+  const {date, id}=req.query;
   try {
-     const date = req.query.date;
+    if(date && id){
      console.log("date :",date);
     // Validate format dd-mm-yy using regex
      const dateRegex = /^\d{2}-\d{2}-\d{2}$/;
      if(!dateRegex.test(date)){
         console.error("invalid date format.");
-       return res.status(400).json({error: "invalid date format. use dd-mm-yy format"})
+       return res.status(400).json({error: "invalid date format."})
       }
-
-      const [day, month, year] = date.split('-');
+     if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "Invalid ObjectId" });
+      }
+      
+      const [year,month,day] = date.split('-');
+      if(day<1||day>31) return res.status(400).json({error: "invalid date format.It must be in YY-MM-DD format"});
+      if(month<1||month>12) return res.status(400).json({error: "invalid date format.It must be in YY-MM-DD format"});
+      
       const fullYear = `20${year}`;
-  
-      const startDate = new Date(`${fullYear}-${month}-${day}T00:00:00.000Z`);
-      const endDate = new Date(`${fullYear}-${month}-${day}T23:59:59.999Z`);
+
       const newDate=`${fullYear}-${month}-${day}`;
-      console.log(`neew format date is : ${newDate}`);
+      console.log(`new format date is : ${newDate}`);
   
-      // Delete all entries of that day
-      const result = await Entry.deleteMany({
-        // date: { $gte: startDate, $lte: endDate }
-        date:newDate
-      });
-  
-      res.status(200).json({
+     
+      // Delete entry of that day
+      const result = await Entry.findOneAndDelete({
+        _id: id,
+        date:newDate,
+      })
+    //  const idResult = await Entry.findByIdAndDelete(id);
+     if(!result){
+      return res.status(400).json({message: "Entry not found"});
+     }
+    //  console.log(dateResult);
+     
+      return res.status(200).json({
         success: true,
-        message: `Deleted entries for ${date}`,
-        deletedCount: result.deletedCount
+        message: `deleted entry : ${result}`,
+        
       });
+    // if(!id){
+    //   console.log(result);
+    //    return res.status(200).json({
+    //     success: true,
+    //     message: `Deleted entries for ${date}`,
+    //     deletedCount: result.deletedCount
+    //   });
+    // }
+    }
+   else{
+    console.log("query parameter is missing");
+    return res.status(500).json({error: "query parameter is missing"});
+   }
     
   } catch (error) {
     console.error("Error in route /entries :",error);
